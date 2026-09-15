@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "SEO Link Collector",
+  "version": "1.0.0",
+  "description": "Collect SEO submission links and text quickly using the Chrome right-click menu.",
+  "permissions": [
+    "contextMenus",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "SEO Link Collector",
+    "default_popup": "popup.html"
+  },
+  "icons": {}
+}

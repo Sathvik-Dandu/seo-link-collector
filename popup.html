@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO Link Collector</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="brand">
+                <div class="brand-icon">🔗</div>
+
+                <div class="brand-text">
+                    <h1>SEO Link Collector</h1>
+                    <p>Collect. Organize. Validate.</p>
+                </div>
+            </div>
+        </header>
+
+        <section class="count-section">
+            <div class="count-number" id="itemCount">0</div>
+            <div class="count-label">LINKS COLLECTED</div>
+        </section>
+
+        <section class="actions">
+            <button id="copyAllBtn" class="action-btn copy-btn" disabled>
+                <span class="button-icon">📋</span>
+                <span>Copy All</span>
+            </button>
+
+            <button id="copyClearBtn" class="action-btn copy-clear-btn" disabled>
+                <span class="button-icon">⚡</span>
+                <span>Copy &amp; Clear</span>
+            </button>
+
+            <button id="clearAllBtn" class="action-btn clear-btn" disabled>
+                <span class="button-icon">🗑</span>
+                <span>Clear All</span>
+            </button>
+        </section>
+
+        <div class="divider"></div>
+
+        <section class="items-section">
+            <div class="section-header">
+                <h2>Collected Links</h2>
+                <span id="itemStatus">No items yet</span>
+            </div>
+
+            <div id="emptyState" class="empty-state">
+                <div class="empty-icon">🔗</div>
+                <h3>No links collected</h3>
+                <p>
+                    Right-click a link and choose
+                    <strong>Add to SEO Collector</strong>.
+                </p>
+            </div>
+
+            <div id="itemsList" class="items-list"></div>
+        </section>
+
+        <footer class="footer">
+            <span>SEO Link Collector</span>
+            <span>v1.0</span>
+        </footer>
+
+        <div id="toast" class="toast"></div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
