@@ -1,41 +1,29 @@
 const STORAGE_KEY = "seoCollectorItems";
+let addQueue = Promise.resolve();
 
-/**
- * Create the context menu items when the extension is installed.
- */
-chrome.runtime.onInstalled.addListener(() => {
-    createContextMenus();
-});
-
-/**
- * Also recreate menus when the service worker starts.
- */
-chrome.runtime.onStartup.addListener(() => {
-    createContextMenus();
+chrome.runtime.onInstalled.addListener(details => {
+    if (details.reason === "install" || details.reason === "update") {
+        createContextMenus();
+    }
 });
 
 function createContextMenus() {
     chrome.contextMenus.removeAll(() => {
+        const removeError = chrome.runtime.lastError;
+        if (removeError) {
+            console.error("Unable to reset SEO Collector context menus:", removeError.message);
+            return;
+        }
 
-        // Add link directly from the context menu
-        chrome.contextMenus.create({
-            id: "addLink",
-            title: "🔗 Add to SEO Collector",
-            contexts: ["link"]
-        });
-
-        // Add selected text directly from the context menu
-        chrome.contextMenus.create({
-            id: "addText",
-            title: "📝 Add Text to SEO Collector",
-            contexts: ["selection"]
-        });
-
-        // Add the current page directly from the context menu
-        chrome.contextMenus.create({
-            id: "addPage",
-            title: "🌐 Add Page to SEO Collector",
-            contexts: ["page"]
+        [
+            { id: "addLink", title: "🔗 Add to SEO Collector", contexts: ["link"] },
+            { id: "addText", title: "📝 Add Text to SEO Collector", contexts: ["selection"] },
+            { id: "addPage", title: "🌐 Add Page to SEO Collector", contexts: ["page"] }
+        ].forEach(menu => {
+            chrome.contextMenus.create(menu, () => {
+                const createError = chrome.runtime.lastError;
+                if (createError) console.error(`Unable to create context menu ${menu.id}:`, createError.message);
+            });
         });
     });
 }
@@ -73,38 +61,131 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await addItem(value.trim(), type);
 });
 
+/* =========================================
+   KEYBOARD SHORTCUTS
+========================================= */
+chrome.commands.onCommand.addListener(async command => {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        const url = tab?.url || "";
+
+        if (!isCollectableUrl(url)) return;
+
+        if (command === "add-current-url") {
+            await addItem(url, "url");
+            return;
+        }
+
+        if (command === "copy-current-url") {
+            await chrome.scripting.executeScript({
+                target: {
+                    tabId: tab.id
+                },
+                args: [url],
+                func: async currentUrl => {
+                    await navigator.clipboard.writeText(currentUrl);
+                }
+            });
+        }
+    } catch (error) {
+        console.error("Unable to handle SEO Collector keyboard command:", error);
+    }
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || !String(message.type || "").startsWith("seoCollector:")) return false;
+
+    runCollectionMutation(async () => {
+        if (message.type === "seoCollector:bulkAdd") return addBulkItems(message.urls);
+        const result = await chrome.storage.local.get(STORAGE_KEY);
+        const items = normalizeStoredItems(result[STORAGE_KEY]);
+
+        if (message.type === "seoCollector:delete") {
+            const next = items.filter(item => item.id !== message.id);
+            await chrome.storage.local.set({ [STORAGE_KEY]: next });
+            return { items: next };
+        }
+        if (message.type === "seoCollector:removeCopied") {
+            const ids = new Set(Array.isArray(message.ids) ? message.ids : []);
+            const next = items.filter(item => !ids.has(item.id));
+            await chrome.storage.local.set({ [STORAGE_KEY]: next });
+            return { items: next };
+        }
+        if (message.type === "seoCollector:clear") {
+            const ids = new Set(Array.isArray(message.ids) ? message.ids : items.map(item => item.id));
+            const next = items.filter(item => !ids.has(item.id));
+            await chrome.storage.local.set({ [STORAGE_KEY]: next });
+            return { items: next };
+        }
+        if (message.type === "seoCollector:shuffle") {
+            const order = Array.isArray(message.ids) ? message.ids : [];
+            const byId = new Map(items.map(item => [item.id, item]));
+            const next = order.map(id => byId.get(id)).filter(Boolean);
+            const included = new Set(next.map(item => item.id));
+            next.push(...items.filter(item => !included.has(item.id)));
+            await chrome.storage.local.set({ [STORAGE_KEY]: next });
+            return { items: next };
+        }
+        throw new Error("Unsupported collection operation");
+    }).then(sendResponse, error => {
+        console.error("Unable to update collected items:", error);
+        sendResponse({ error: error.message || "Unable to update collection" });
+    });
+    return true;
+});
+
 /**
  * Add an item to Chrome storage.
  */
 async function addItem(value, type) {
+    return runCollectionMutation(async () => {
+        const result = await chrome.storage.local.get(STORAGE_KEY);
+        const items = normalizeStoredItems(result[STORAGE_KEY]);
+        if (items.some(item => item.value.toLowerCase() === value.toLowerCase())) return;
 
+        items.push({ id: crypto.randomUUID(), value, type, createdAt: Date.now() });
+        await chrome.storage.local.set({ [STORAGE_KEY]: items });
+        return { items };
+    });
+}
+
+function runCollectionMutation(mutation) {
+    const operation = addQueue.then(mutation);
+    addQueue = operation.catch(error => console.error("Collection update failed:", error));
+    return operation;
+}
+
+function normalizeStoredItems(value) {
+    if (!Array.isArray(value)) return [];
+    return value.filter(item => item && typeof item.value === "string").map(item => ({
+        ...item,
+        id: typeof item.id === "string" && item.id ? item.id : `legacy-${crypto.randomUUID()}`
+    }));
+}
+
+async function addBulkItems(values) {
     const result = await chrome.storage.local.get(STORAGE_KEY);
+    const items = normalizeStoredItems(result[STORAGE_KEY]);
+    const knownValues = new Set(items.map(item => item.value.toLowerCase()));
+    let duplicates = 0;
+    const addedItems = [];
 
-    const items = result[STORAGE_KEY] || [];
-
-    // Check duplicates
-    const duplicate = items.some(
-        item => item.value.toLowerCase() === value.toLowerCase()
-    );
-
-    if (duplicate) {
-        return;
+    for (const rawValue of Array.isArray(values) ? values : []) {
+        const value = typeof rawValue === "string" ? rawValue.trim() : "";
+        if (!isCollectableUrl(value)) continue;
+        const key = value.toLowerCase();
+        if (knownValues.has(key)) {
+            duplicates++;
+            continue;
+        }
+        knownValues.add(key);
+        const item = { id: crypto.randomUUID(), value, type: "url", createdAt: Date.now() };
+        items.push(item);
+        addedItems.push(item);
     }
 
-    const newItem = {
-        id: crypto.randomUUID(),
-        value: value,
-        type: type,
-        createdAt: Date.now()
-    };
-
-    items.push(newItem);
-
-    await chrome.storage.local.set({
-        [STORAGE_KEY]: items
-    });
-
-    await updateBadge(items.length);
+    if (addedItems.length) await chrome.storage.local.set({ [STORAGE_KEY]: items });
+    return { added: addedItems.length, duplicates, items };
 }
 
 /**
@@ -116,7 +197,7 @@ async function updateBadge(count) {
     });
 
     await chrome.action.setBadgeBackgroundColor({
-        color: "#111827"
+        color: "#2458A6"
     });
 }
 
@@ -138,8 +219,15 @@ function isUrl(value) {
     }
 }
 
+/**
+ * Determine whether a page URL can be collected.
+ */
+function isCollectableUrl(value) {
+    return isUrl(value);
+}
+
 chrome.storage.local.get(STORAGE_KEY, result => {
-    const items = result[STORAGE_KEY] || [];
+    const items = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
 
     updateBadge(items.length);
 });
@@ -149,7 +237,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         return;
     }
 
-    const items = changes[STORAGE_KEY].newValue || [];
+    const items = Array.isArray(changes[STORAGE_KEY].newValue) ? changes[STORAGE_KEY].newValue : [];
 
     updateBadge(items.length);
 });

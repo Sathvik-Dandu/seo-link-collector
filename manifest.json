@@ -1,18 +1,46 @@
 {
   "manifest_version": 3,
   "name": "SEO Link Collector",
-  "version": "1.0.0",
-  "description": "Collect SEO submission links and text quickly using the Chrome right-click menu.",
+  "version": "1.0",
+  "description": "Collect SEO submission links and text directly from Chrome and copy them to Google Sheets.",
   "permissions": [
     "contextMenus",
-    "storage"
+    "storage",
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_title": "SEO Link Collector",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
   },
-  "icons": {}
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "commands": {
+    "add-current-url": {
+      "suggested_key": {
+        "default": "Ctrl+Period"
+      },
+      "description": "Add current page URL to SEO Collector"
+    },
+    "copy-current-url": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Period"
+      },
+      "description": "Copy current page URL"
+    }
+  }
 }
