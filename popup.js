@@ -1,5 +1,6 @@
 const STORAGE_KEY = "seoCollectorItems";
 const SETTINGS_KEY = "seoCollectorSettings";
+const UNDO_KEY = "seoCollectorClearUndo";
 const DEFAULT_SETTINGS = { blankRowsEnabled: false, blankRowInterval: 10 };
 const itemCount = document.getElementById("itemCount");
 const itemStatus = document.getElementById("itemStatus");
@@ -27,12 +28,25 @@ let items = [];
 let settings = { ...DEFAULT_SETTINGS };
 let selectedIds = new Set();
 let toastTimer;
+let undoExpiryTimer;
+let undoToken;
 
 document.addEventListener("DOMContentLoaded", initialize);
 
 async function initialize() {
     try {
-        const result = await chrome.storage.local.get([STORAGE_KEY, SETTINGS_KEY]);
+        const result = await chrome.storage.local.get([STORAGE_KEY, SETTINGS_KEY, UNDO_KEY]);
+        const undo = result[UNDO_KEY];
+        if (undo && (!Number.isFinite(undo.expiresAt) || undo.expiresAt <= Date.now() || !Array.isArray(undo.items))) {
+            await chrome.storage.local.remove(UNDO_KEY);
+            try {
+                await chrome.alarms.clear("seoCollectorClearUndoExpiry");
+            } catch (error) {
+                console.error("Unable to clear expired undo alarm:", error);
+            }
+        } else if (undo) {
+            undoToken = undo.token;
+        }
         items = normalizeItems(result[STORAGE_KEY]);
         settings = normalizeSettings(result[SETTINGS_KEY]);
         blankRowsEnabled.checked = settings.blankRowsEnabled;
@@ -42,6 +56,7 @@ async function initialize() {
             await saveItems(items);
         }
         render();
+        if (undoToken) showUndoToast(undo.message || "All links cleared", undo.expiresAt);
     } catch (error) {
         console.error("Unable to load collector data:", error);
         showToast("Unable to load saved items");
@@ -230,18 +245,38 @@ copySelectedBtn.addEventListener("click", async () => {
 copyClearBtn.addEventListener("click", async () => {
     const snapshot = await getItems();
     if (!(await writeClipboard(snapshot))) return;
-    // Remove only the copied IDs so a link collected while the clipboard was writing is retained.
-    await requestCollectionMutation("removeCopied", { ids: snapshot.map(item => item.id) });
+    let undoExpiresAt;
+    try {
+        const response = await requestCollectionMutation("clear", {
+            ids: snapshot.map(item => item.id),
+            undoMessage: "Links copied and cleared"
+        });
+        items = response.items;
+        if (!response.cleared?.length) return;
+        undoToken = response.undoToken;
+        undoExpiresAt = response.undoExpiresAt;
+    } catch (error) {
+        console.error("Copy & Clear storage error:", error);
+        return;
+    }
     selectedIds.clear();
     render();
-    showToast(`${snapshot.length} ${snapshot.length === 1 ? "item" : "items"} copied & cleared`);
+    showUndoToast("Links copied and cleared", undoExpiresAt);
 });
 
 clearAllBtn.addEventListener("click", async () => {
     const current = await getItems();
     if (!current.length || !confirm(`Delete all ${current.length} collected items?`)) return;
+    let undoExpiresAt;
     try {
-        await requestCollectionMutation("clear", { ids: current.map(item => item.id) });
+        const response = await requestCollectionMutation("clear", {
+            ids: current.map(item => item.id),
+            undoMessage: "All links cleared"
+        });
+        items = response.items;
+        if (!response.cleared?.length) return;
+        undoToken = response.undoToken;
+        undoExpiresAt = response.undoExpiresAt;
     } catch (error) {
         console.error("Clear error:", error);
         showToast("Unable to clear items");
@@ -249,7 +284,7 @@ clearAllBtn.addEventListener("click", async () => {
     }
     selectedIds.clear();
     render();
-    showToast("All items cleared");
+    showUndoToast("All links cleared", undoExpiresAt);
 });
 
 randomizeBtn.addEventListener("click", async () => {
@@ -382,10 +417,63 @@ function escapeAttribute(text) {
 }
 
 function showToast(message) {
+    // Keep the two-minute undo action visible and actionable if another notice occurs.
+    if (undoToken) return;
     toast.textContent = message;
     toast.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
+}
+
+function showUndoToast(message, expiresAt) {
+    const remainingMs = Math.max(0, expiresAt - Date.now());
+    if (!remainingMs) {
+        undoToken = undefined;
+        return;
+    }
+    toast.replaceChildren(document.createTextNode(`${message} `));
+    const undoButton = document.createElement("button");
+    undoButton.type = "button";
+    undoButton.className = "toast-undo";
+    undoButton.textContent = "Undo";
+    undoButton.setAttribute("aria-label", "Undo clearing links");
+    const token = undoToken;
+    undoButton.addEventListener("click", async () => {
+        if (!token || token !== undoToken) return;
+        undoButton.disabled = true;
+        try {
+            const response = await requestCollectionMutation("undoClear", { token });
+            undoToken = undefined;
+            clearTimeout(undoExpiryTimer);
+            items = response.items;
+            render();
+            toast.textContent = response.restored ? "Links restored" : "No links to restore";
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
+        } catch (error) {
+            console.error("Undo clear error:", error);
+            undoToken = undefined;
+            toast.textContent = "Unable to restore links";
+            clearTimeout(undoExpiryTimer);
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
+        }
+    });
+    toast.appendChild(undoButton);
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    clearTimeout(undoExpiryTimer);
+    undoExpiryTimer = setTimeout(async () => {
+        try {
+            await requestCollectionMutation("expireUndo", { token });
+        } catch (error) {
+            console.error("Undo backup cleanup error:", error);
+        }
+        if (undoToken === token) {
+            undoToken = undefined;
+            if (toast.querySelector(".toast-undo")) toast.classList.remove("show");
+        }
+    }, remainingMs);
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

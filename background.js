@@ -1,4 +1,7 @@
 const STORAGE_KEY = "seoCollectorItems";
+const UNDO_KEY = "seoCollectorClearUndo";
+const UNDO_TTL_MS = 120_000;
+const UNDO_ALARM = "seoCollectorClearUndoExpiry";
 let addQueue = Promise.resolve();
 
 chrome.runtime.onInstalled.addListener(details => {
@@ -113,9 +116,55 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         if (message.type === "seoCollector:clear") {
             const ids = new Set(Array.isArray(message.ids) ? message.ids : items.map(item => item.id));
+            const cleared = items.filter(item => ids.has(item.id));
+            if (!cleared.length) return { items, cleared: [] };
             const next = items.filter(item => !ids.has(item.id));
+            const undo = {
+                token: crypto.randomUUID(),
+                expiresAt: Date.now() + UNDO_TTL_MS,
+                message: message.undoMessage === "Links copied and cleared" ? "Links copied and cleared" : "All links cleared",
+                items: cleared
+            };
+            await chrome.storage.local.set({ [STORAGE_KEY]: next, [UNDO_KEY]: undo });
+            await scheduleUndoExpiry(undo.expiresAt);
+            return { items: next, cleared, undoToken: undo.token, undoExpiresAt: undo.expiresAt };
+        }
+        if (message.type === "seoCollector:undoClear") {
+            const stored = await chrome.storage.local.get(UNDO_KEY);
+            const undo = stored[UNDO_KEY];
+            if (!undo || undo.token !== message.token || undo.expiresAt <= Date.now() || !Array.isArray(undo.items)) {
+                if (undo?.token === message.token) {
+                    await chrome.storage.local.remove(UNDO_KEY);
+                    await clearUndoExpiry();
+                }
+                return { restored: false, items };
+            }
+            const currentResult = await chrome.storage.local.get(STORAGE_KEY);
+            const current = normalizeStoredItems(currentResult[STORAGE_KEY]);
+            const ids = new Set(current.map(item => item.id));
+            const values = new Set(current.map(item => item.value.toLowerCase()));
+            const restored = [];
+            for (const item of undo.items) {
+                const valueKey = item.value.toLowerCase();
+                if (ids.has(item.id) || values.has(valueKey)) continue;
+                restored.push(item);
+                ids.add(item.id);
+                values.add(valueKey);
+            }
+            // Keep cleared entries in their original order, followed by anything collected since clearing.
+            const next = [...restored, ...current];
             await chrome.storage.local.set({ [STORAGE_KEY]: next });
-            return { items: next };
+            await chrome.storage.local.remove(UNDO_KEY);
+            await clearUndoExpiry();
+            return { restored: restored.length > 0, items: next };
+        }
+        if (message.type === "seoCollector:expireUndo") {
+            const stored = await chrome.storage.local.get(UNDO_KEY);
+            if (stored[UNDO_KEY]?.token === message.token && stored[UNDO_KEY].expiresAt <= Date.now()) {
+                await chrome.storage.local.remove(UNDO_KEY);
+                await clearUndoExpiry();
+            }
+            return { expired: true };
         }
         if (message.type === "seoCollector:shuffle") {
             const order = Array.isArray(message.ids) ? message.ids : [];
@@ -132,6 +181,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ error: error.message || "Unable to update collection" });
     });
     return true;
+});
+
+// Remove expired temporary undo data when the worker starts. The popup also
+// expires its visible Undo action; this check covers a popup closed meanwhile.
+chrome.runtime.onStartup.addListener(async () => {
+    const result = await chrome.storage.local.get(UNDO_KEY);
+    const undo = result[UNDO_KEY];
+    if (!undo) return;
+    if (!Number.isFinite(undo.expiresAt) || undo.expiresAt <= Date.now()) {
+        await chrome.storage.local.remove(UNDO_KEY);
+        await clearUndoExpiry();
+    } else {
+        await scheduleUndoExpiry(undo.expiresAt);
+    }
+});
+
+chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name !== UNDO_ALARM) return;
+    runCollectionMutation(async () => {
+        const result = await chrome.storage.local.get(UNDO_KEY);
+        if (result[UNDO_KEY]?.expiresAt <= Date.now()) await chrome.storage.local.remove(UNDO_KEY);
+    }).catch(error => console.error("Unable to expire cleared-link backup:", error));
 });
 
 /**
@@ -153,6 +224,22 @@ function runCollectionMutation(mutation) {
     const operation = addQueue.then(mutation);
     addQueue = operation.catch(error => console.error("Collection update failed:", error));
     return operation;
+}
+
+async function scheduleUndoExpiry(expiresAt) {
+    try {
+        await chrome.alarms.create(UNDO_ALARM, { when: expiresAt });
+    } catch (error) {
+        console.error("Unable to schedule undo-backup cleanup:", error);
+    }
+}
+
+async function clearUndoExpiry() {
+    try {
+        await chrome.alarms.clear(UNDO_ALARM);
+    } catch (error) {
+        console.error("Unable to clear undo-backup alarm:", error);
+    }
 }
 
 function normalizeStoredItems(value) {
