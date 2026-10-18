@@ -1,4 +1,5 @@
 const STORAGE_KEY = "seoCollectorItems";
+const SHUFFLE_STATE_KEY = "seoCollectorShuffleState";
 const UNDO_KEY = "seoCollectorClearUndo";
 const UNDO_TTL_MS = 120_000;
 const UNDO_ALARM = "seoCollectorClearUndoExpiry";
@@ -151,7 +152,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                 ids.add(item.id);
                 values.add(valueKey);
             }
-            // Keep cleared entries in their original order, followed by anything collected since clearing.
+            // Restore the saved sequence first, then retain links added while it was cleared.
             const next = [...restored, ...current];
             await chrome.storage.local.set({ [STORAGE_KEY]: next });
             await chrome.storage.local.remove(UNDO_KEY);
@@ -172,7 +173,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             const next = order.map(id => byId.get(id)).filter(Boolean);
             const included = new Set(next.map(item => item.id));
             next.push(...items.filter(item => !included.has(item.id)));
-            await chrome.storage.local.set({ [STORAGE_KEY]: next });
+            const shuffleState = {
+                lastOrderIds: next.map(item => item.id),
+                lastMode: ["quick", "smart", "again"].includes(message.mode) ? message.mode : "quick",
+                shuffledAt: Date.now()
+            };
+            await chrome.storage.local.set({
+                [STORAGE_KEY]: next,
+                [SHUFFLE_STATE_KEY]: shuffleState
+            });
             return { items: next };
         }
         throw new Error("Unsupported collection operation");

@@ -1,6 +1,9 @@
 const STORAGE_KEY = "seoCollectorItems";
 const SETTINGS_KEY = "seoCollectorSettings";
 const UNDO_KEY = "seoCollectorClearUndo";
+const SHUFFLE_STATE_KEY = "seoCollectorShuffleState";
+const UNDO_TTL_MS = 120_000;
+const TWO_LEVEL_PUBLIC_SUFFIXES = new Set(["co.uk", "org.uk", "gov.uk", "ac.uk", "net.uk", "com.au", "net.au", "org.au", "co.jp", "co.in", "com.br"]);
 const DEFAULT_SETTINGS = { blankRowsEnabled: false, blankRowInterval: 10 };
 const itemCount = document.getElementById("itemCount");
 const itemStatus = document.getElementById("itemStatus");
@@ -10,6 +13,7 @@ const copyAllBtn = document.getElementById("copyAllBtn");
 const copyClearBtn = document.getElementById("copyClearBtn");
 const clearAllBtn = document.getElementById("clearAllBtn");
 const randomizeBtn = document.getElementById("randomizeBtn");
+const shuffleMode = document.getElementById("shuffleMode");
 const copySelectedBtn = document.getElementById("copySelectedBtn");
 const selectAllBtn = document.getElementById("selectAllBtn");
 const deselectAllBtn = document.getElementById("deselectAllBtn");
@@ -18,6 +22,10 @@ const blankRowsEnabled = document.getElementById("blankRowsEnabled");
 const blankRowInterval = document.getElementById("blankRowInterval");
 const intervalError = document.getElementById("intervalError");
 const toast = document.getElementById("toast");
+const clearConfirmDialog = document.getElementById("clearConfirmDialog");
+const clearConfirmCount = document.getElementById("clearConfirmCount");
+const clearCancelBtn = document.getElementById("clearCancelBtn");
+const clearConfirmBtn = document.getElementById("clearConfirmBtn");
 const bulkToggleBtn = document.getElementById("bulkToggleBtn");
 const bulkPanel = document.getElementById("bulkPanel");
 const bulkInput = document.getElementById("bulkInput");
@@ -29,7 +37,10 @@ let settings = { ...DEFAULT_SETTINGS };
 let selectedIds = new Set();
 let toastTimer;
 let undoExpiryTimer;
+let undoCountdownTimer;
 let undoToken;
+let clearInProgress = false;
+const app = document.querySelector(".app");
 
 document.addEventListener("DOMContentLoaded", initialize);
 
@@ -91,7 +102,10 @@ function render() {
     copyAllBtn.disabled = items.length === 0;
     copyClearBtn.disabled = items.length === 0;
     clearAllBtn.disabled = items.length === 0;
+    clearConfirmCount.textContent = `${items.length} collected ${items.length === 1 ? "item" : "items"}`;
+    if (!items.length && clearConfirmDialog.open && !clearInProgress) clearConfirmDialog.close();
     randomizeBtn.disabled = items.length < 2;
+    shuffleMode.disabled = items.length < 2;
     selectedCount.textContent = `${selectedIds.size} selected`;
     copySelectedBtn.disabled = selectedIds.size === 0;
     selectAllBtn.disabled = items.length === 0 || selectedIds.size === items.length;
@@ -266,41 +280,203 @@ copyClearBtn.addEventListener("click", async () => {
 
 clearAllBtn.addEventListener("click", async () => {
     const current = await getItems();
-    if (!current.length || !confirm(`Delete all ${current.length} collected items?`)) return;
+    if (!current.length) return;
+    clearConfirmCount.textContent = `${current.length} collected ${current.length === 1 ? "item" : "items"}`;
+    clearConfirmDialog.showModal();
+    clearCancelBtn.focus();
+});
+
+clearCancelBtn.addEventListener("click", () => {
+    if (!clearInProgress) clearConfirmDialog.close();
+});
+
+clearConfirmDialog.addEventListener("click", event => {
+    if (event.target === clearConfirmDialog && !clearInProgress) clearConfirmDialog.close();
+});
+
+clearConfirmBtn.addEventListener("click", async () => {
+    if (clearInProgress) return;
+    clearInProgress = true;
+    clearConfirmBtn.disabled = true;
+    clearCancelBtn.disabled = true;
+    clearAllBtn.disabled = true;
     let undoExpiresAt;
     try {
+        const current = await getItems();
+        if (!current.length) {
+            clearConfirmDialog.close();
+            return;
+        }
         const response = await requestCollectionMutation("clear", {
             ids: current.map(item => item.id),
             undoMessage: "All links cleared"
         });
         items = response.items;
-        if (!response.cleared?.length) return;
+        if (!response.cleared?.length) {
+            render();
+            clearConfirmDialog.close();
+            return;
+        }
         undoToken = response.undoToken;
         undoExpiresAt = response.undoExpiresAt;
     } catch (error) {
         console.error("Clear error:", error);
         showToast("Unable to clear items");
-        return;
+    } finally {
+        clearInProgress = false;
+        clearConfirmBtn.disabled = false;
+        clearCancelBtn.disabled = false;
+        clearAllBtn.disabled = items.length === 0;
     }
+    clearConfirmDialog.close();
+    if (!undoExpiresAt) return;
     selectedIds.clear();
     render();
     showUndoToast("All links cleared", undoExpiresAt);
 });
 
 randomizeBtn.addEventListener("click", async () => {
-    const shuffled = await getItems();
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
+    const current = await getItems();
+    if (current.length < 2) return;
+    const selectedMode = shuffleMode.value;
     try {
-        await requestCollectionMutation("shuffle", { ids: shuffled.map(item => item.id) });
-        showToast("Links randomized");
+        const shuffleData = await chrome.storage.local.get(SHUFFLE_STATE_KEY);
+        const stateOrder = shuffleData[SHUFFLE_STATE_KEY]?.lastOrderIds;
+        const previousOrder = buildPreviousOrder(current, stateOrder);
+        let shuffled;
+        if (selectedMode === "smart") {
+            shuffled = smartShuffle(current);
+        } else if (selectedMode === "again") {
+            shuffled = shuffleAgain(current, previousOrder);
+        } else {
+            // Quick Shuffle is exactly one Fisher–Yates pass.
+            shuffled = fisherYates(current);
+        }
+        const response = await requestCollectionMutation("shuffle", {
+            ids: shuffled.map(item => item.id),
+            mode: selectedMode
+        });
+        items = response.items;
+        render();
+        animateShuffle();
+        showToast(selectedMode === "smart" ? "Smart shuffle complete" : "Links randomized");
     } catch (error) {
         console.error("Randomize error:", error);
-        showToast("Unable to randomize links");
+        showToast("Unable to randomize links. Try again.");
     }
 });
+
+function fisherYates(source) {
+    const shuffled = [...source];
+    for (let index = shuffled.length - 1; index > 0; index--) {
+        const swapIndex = secureRandomIndex(index + 1);
+        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    return shuffled;
+}
+
+// Rejection sampling avoids modulo bias when turning secure random words into indices.
+function secureRandomIndex(maxExclusive) {
+    const range = 0x1_0000_0000;
+    const limit = range - (range % maxExclusive);
+    const word = new Uint32Array(1);
+    do {
+        crypto.getRandomValues(word);
+    } while (word[0] >= limit);
+    return word[0] % maxExclusive;
+}
+
+function buildPreviousOrder(source, lastOrderIds) {
+    const currentIds = new Set(source.map(item => item.id));
+    const stored = [];
+    const seen = new Set();
+    if (Array.isArray(lastOrderIds)) {
+        for (const id of lastOrderIds) {
+            if (currentIds.has(id) && !seen.has(id)) {
+                stored.push(id);
+                seen.add(id);
+            }
+        }
+    }
+    stored.push(...source.filter(item => !seen.has(item.id)).map(item => item.id));
+    return stored;
+}
+
+function shuffleAgain(source, previousOrderIds) {
+    if (source.length < 2) return [...source];
+    const previous = previousOrderIds.join("\u0000");
+    // A fixed candidate budget prevents retries from growing without bound.
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const candidate = fisherYates(source);
+        if (candidate.map(item => item.id).join("\u0000") !== previous) return candidate;
+    }
+    // If sampling repeated the same ordering each time, swap a pair to guarantee a fresh order.
+    const fallback = fisherYates(source);
+    [fallback[0], fallback[1]] = [fallback[1], fallback[0]];
+    return fallback;
+}
+
+// Choose the least-adjacent-similarity permutation from a size-bounded sample.
+function smartShuffle(source) {
+    if (source.length < 2) return [...source];
+    const descriptors = new Map(source.map(item => [item.id, describeUrlSimilarity(item)]));
+    const candidateCount = Math.max(2, Math.min(48, Math.floor(400_000 / source.length)));
+    let best = null;
+    let bestScore = Infinity;
+    for (let attempt = 0; attempt < candidateCount; attempt++) {
+        const candidate = fisherYates(source);
+        let score = 0;
+        for (let index = 1; index < candidate.length; index++) {
+            score += adjacentSimilarity(descriptors.get(candidate[index - 1].id), descriptors.get(candidate[index].id));
+        }
+        if (score < bestScore) {
+            best = candidate;
+            bestScore = score;
+        }
+    }
+    return best || fisherYates(source);
+}
+
+function describeUrlSimilarity(item) {
+    if (item.type !== "url") return { isUrl: false };
+    try {
+        const url = new URL(item.value);
+        const host = url.hostname.toLowerCase().replace(/^www\./, "");
+        const labels = host.split(".").filter(Boolean);
+        const suffix = labels.slice(-2).join(".");
+        const isIpAddress = host.includes(":") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+        const baseDomain = isIpAddress ? host : labels.length > 2 && TWO_LEVEL_PUBLIC_SUFFIXES.has(suffix)
+            ? labels.slice(-3).join(".")
+            : labels.length > 1 ? suffix : host;
+        const segments = url.pathname.split("/").filter(Boolean);
+        const pathShape = segments.map(segment => {
+            if (/^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9a-f]{16,})$/i.test(segment)) return ":id";
+            const extension = segment.match(/\.([a-z0-9]{1,8})$/i)?.[1]?.toLowerCase();
+            return extension ? `:file.${extension}` : segment.toLowerCase();
+        }).join("/");
+        const queryShape = [...new Set([...url.searchParams.keys()])].sort().join("&");
+        return { isUrl: true, host, baseDomain, pathShape, segmentCount: segments.length, queryShape };
+    } catch {
+        return { isUrl: false };
+    }
+}
+
+function adjacentSimilarity(left, right) {
+    if (!left?.isUrl || !right?.isUrl) return 0;
+    let score = 0;
+    if (left.host === right.host) score += 6;
+    else if (left.baseDomain === right.baseDomain) score += 2;
+    if (left.pathShape === right.pathShape) score += 4;
+    if (left.segmentCount === right.segmentCount) score += 1;
+    if (left.queryShape && left.queryShape === right.queryShape) score += 1;
+    return score;
+}
+
+function animateShuffle() {
+    itemsList.classList.remove("shuffle-feedback");
+    void itemsList.offsetWidth;
+    itemsList.classList.add("shuffle-feedback");
+}
 
 bulkToggleBtn.addEventListener("click", () => {
     bulkPanel.hidden = !bulkPanel.hidden;
@@ -428,7 +604,11 @@ function showToast(message) {
 function showUndoToast(message, expiresAt) {
     const remainingMs = Math.max(0, expiresAt - Date.now());
     if (!remainingMs) {
+        const expiredToken = undoToken;
         undoToken = undefined;
+        clearUndoTimers();
+        app.classList.remove("undo-active");
+        requestCollectionMutation("expireUndo", { token: expiredToken }).catch(error => console.error("Undo backup cleanup error:", error));
         return;
     }
     toast.replaceChildren(document.createTextNode(`${message} `));
@@ -444,37 +624,83 @@ function showUndoToast(message, expiresAt) {
         try {
             const response = await requestCollectionMutation("undoClear", { token });
             undoToken = undefined;
-            clearTimeout(undoExpiryTimer);
+            clearUndoTimers();
+            app.classList.remove("undo-active");
             items = response.items;
+            toast.replaceChildren(document.createTextNode(response.restored ? "Links restored" : "No links to restore"));
+            toast.classList.add("show");
             render();
-            toast.textContent = response.restored ? "Links restored" : "No links to restore";
             clearTimeout(toastTimer);
             toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
         } catch (error) {
             console.error("Undo clear error:", error);
             undoToken = undefined;
-            toast.textContent = "Unable to restore links";
-            clearTimeout(undoExpiryTimer);
+            clearUndoTimers();
+            app.classList.remove("undo-active");
+            toast.replaceChildren(document.createTextNode("Unable to restore links"));
+            toast.classList.add("show");
             clearTimeout(toastTimer);
             toastTimer = setTimeout(() => toast.classList.remove("show"), 2000);
         }
     });
-    toast.appendChild(undoButton);
+    const content = document.createElement("div");
+    content.className = "undo-toast-content";
+    const messageText = document.createElement("span");
+    messageText.className = "undo-message";
+    messageText.textContent = message;
+    const countdown = document.createElement("span");
+    countdown.className = "undo-countdown";
+    countdown.setAttribute("role", "timer");
+    countdown.setAttribute("aria-live", "off");
+    content.append(messageText, countdown, undoButton);
+    const progress = document.createElement("div");
+    progress.className = "undo-progress";
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-label", "Undo time remaining");
+    progress.setAttribute("aria-valuemin", "0");
+    progress.setAttribute("aria-valuemax", String(UNDO_TTL_MS));
+    const progressValue = document.createElement("span");
+    progress.appendChild(progressValue);
+    toast.replaceChildren(content, progress);
     toast.classList.add("show");
+    app.classList.add("undo-active");
     clearTimeout(toastTimer);
-    clearTimeout(undoExpiryTimer);
-    undoExpiryTimer = setTimeout(async () => {
-        try {
-            await requestCollectionMutation("expireUndo", { token });
-        } catch (error) {
-            console.error("Undo backup cleanup error:", error);
-        }
-        if (undoToken === token) {
-            undoToken = undefined;
-            if (toast.querySelector(".toast-undo")) toast.classList.remove("show");
-        }
-    }, remainingMs);
+    clearUndoTimers();
+    const updateCountdown = () => {
+        if (undoToken !== token) return;
+        const remaining = Math.max(0, expiresAt - Date.now());
+        countdown.textContent = formatUndoCountdown(remaining);
+        progressValue.style.width = `${Math.min(100, (remaining / UNDO_TTL_MS) * 100)}%`;
+        progress.setAttribute("aria-valuenow", String(remaining));
+        if (!remaining) expireUndoToast(token);
+    };
+    updateCountdown();
+    undoCountdownTimer = setInterval(updateCountdown, 250);
+    undoExpiryTimer = setTimeout(() => expireUndoToast(token), remainingMs);
 }
+
+function formatUndoCountdown(remainingMs) {
+    const totalSeconds = Math.ceil(Math.max(0, remainingMs) / 1000);
+    return `${String(Math.floor(totalSeconds / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
+}
+
+function expireUndoToast(token) {
+    if (undoToken !== token) return;
+    undoToken = undefined;
+    clearUndoTimers();
+    app.classList.remove("undo-active");
+    toast.classList.remove("show");
+    requestCollectionMutation("expireUndo", { token }).catch(error => console.error("Undo backup cleanup error:", error));
+}
+
+function clearUndoTimers() {
+    clearTimeout(undoExpiryTimer);
+    clearInterval(undoCountdownTimer);
+    undoExpiryTimer = undefined;
+    undoCountdownTimer = undefined;
+}
+
+window.addEventListener("pagehide", clearUndoTimers);
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
