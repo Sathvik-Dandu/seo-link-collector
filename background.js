@@ -99,6 +99,27 @@ chrome.commands.onCommand.addListener(async command => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !String(message.type || "").startsWith("seoCollector:")) return false;
 
+    if (message.type === "seoCollector:hoveredLink") {
+        const value = typeof message.url === "string" ? message.url.trim() : "";
+        if (!isCollectableUrl(value)) {
+            sendResponse({ added: false, duplicate: false });
+            return false;
+        }
+        addItem(value, "url").then(sendResponse, error => {
+            console.error("Unable to add hovered link:", error);
+            sendResponse({ error: "Unable to add hovered link" });
+        });
+        return true;
+    }
+
+    if (message.type === "seoCollector:quickPaste") {
+        getQuickPasteText().then(sendResponse, error => {
+            console.error("Unable to prepare quick paste:", error);
+            sendResponse({ error: "Unable to prepare links" });
+        });
+        return true;
+    }
+
     runCollectionMutation(async () => {
         if (message.type === "seoCollector:bulkAdd") return addBulkItems(message.urls);
         const result = await chrome.storage.local.get(STORAGE_KEY);
@@ -182,6 +203,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                 [STORAGE_KEY]: next,
                 [SHUFFLE_STATE_KEY]: shuffleState
             });
+
+            async function getQuickPasteText() {
+                const result = await chrome.storage.local.get([STORAGE_KEY, "seoCollectorSettings"]);
+                const items = normalizeStoredItems(result[STORAGE_KEY]);
+                if (!items.length) return { text: "", message: "No collected links yet" };
+                const settings = result.seoCollectorSettings || {};
+                const interval = Number(settings.blankRowInterval);
+                const useBlankRows = settings.blankRowsEnabled === true && Number.isInteger(interval) && interval > 0;
+                const rows = [];
+                items.forEach((item, index) => {
+                    rows.push(item.value);
+                    if (useBlankRows && (index + 1) % interval === 0 && index < items.length - 1) rows.push("");
+                });
+                return { text: rows.join("\n") };
+            }
             return { items: next };
         }
         throw new Error("Unsupported collection operation");
@@ -221,11 +257,13 @@ async function addItem(value, type) {
     return runCollectionMutation(async () => {
         const result = await chrome.storage.local.get(STORAGE_KEY);
         const items = normalizeStoredItems(result[STORAGE_KEY]);
-        if (items.some(item => item.value.toLowerCase() === value.toLowerCase())) return;
+        if (items.some(item => item.value.toLowerCase() === value.toLowerCase())) {
+            return { added: false, duplicate: true };
+        }
 
         items.push({ id: crypto.randomUUID(), value, type, createdAt: Date.now() });
         await chrome.storage.local.set({ [STORAGE_KEY]: items });
-        return { items };
+        return { added: true, duplicate: false, items };
     });
 }
 

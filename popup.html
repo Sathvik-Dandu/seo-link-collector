@@ -8,13 +8,18 @@
 </head>
 <body>
   <main class="app">
+    <div class="gradient-layer gradient-layer-one" aria-hidden="true"></div>
+    <div class="gradient-layer gradient-layer-two" aria-hidden="true"></div>
+    <div class="gradient-layer gradient-layer-three" aria-hidden="true"></div>
+    <div class="gradient-layer gradient-layer-four" aria-hidden="true"></div>
     <header class="header">
       <img src="icon.png" alt="" class="brand-icon">
       <div class="brand-text"><h1>SEO Link Collector</h1><p>Keep your submission links ready</p></div>
-      <div class="count" aria-label="Collected item count"><strong id="itemCount">0</strong><span>items</span></div>
+      <div class="header-tools"><button id="shortcutsBtn" class="toolbar-button" type="button">Keyboard Shortcuts</button><div class="count" aria-label="Collected item count"><strong id="itemCount">0</strong><span>items</span></div></div>
     </header>
     <section class="actions" aria-label="Collection actions">
       <button id="copyAllBtn" class="button primary" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="11" rx="2"/><path d="M13 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1"/></svg>Copy All</button>
+      <button id="quickPasteBtn" class="button primary" disabled>Quick Paste</button>
       <button id="copyClearBtn" class="button secondary" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M8 5V3h4v2m3 0-.7 11H5.7L5 5m3 3v5m4-5v5"/></svg>Copy &amp; Clear</button>
       <button id="clearAllBtn" class="button danger" disabled>Clear All</button>
     </section>
@@ -63,6 +68,21 @@
           <button id="clearCancelBtn" class="confirm-button confirm-cancel" type="button">Cancel</button>
           <button id="clearConfirmBtn" class="confirm-button confirm-destructive" type="button">Clear all</button>
         </div>
+      </div>
+    </dialog>
+    <dialog id="shortcutsDialog" class="shortcuts-dialog" aria-labelledby="shortcutsTitle">
+      <div class="shortcuts-card">
+        <h2 id="shortcutsTitle">Keyboard Shortcuts</h2>
+        <p class="shortcuts-note">Shortcuts work on ordinary webpages. Ctrl + Space copies the formatted list; some browsers and apps require Ctrl + V to finish pasting.</p>
+        <div class="shortcut-list">
+          <div><kbd>Ctrl</kbd><span>+</span><kbd>Alt</kbd><p>Collect the hyperlink currently under your pointer.</p></div>
+          <div><kbd>Ctrl</kbd><span>+</span><kbd>Space</kbd><p>Copy all collected links for quick paste into an editable destination.</p></div>
+          <div><kbd>Ctrl</kbd><span>+</span><kbd>.</kbd><p>Add the current page to the collector.</p></div>
+          <div><kbd>Right-click</kbd><strong>→ Add to SEO Collector</strong><p>Collect the link under the pointer.</p></div>
+          <div><kbd>Right-click</kbd><strong>→ Add Text to SEO Collector</strong><p>Collect selected text.</p></div>
+          <div><kbd>Right-click</kbd><strong>→ Add Page to SEO Collector</strong><p>Collect the current page.</p></div>
+        </div>
+        <button id="shortcutsCloseBtn" class="primary-button" type="button">Close</button>
       </div>
     </dialog>
   </main>

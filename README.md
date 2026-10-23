@@ -64,6 +64,14 @@ After **Clear All** or **Copy & Clear**, use **Undo** within two minutes to rest
 
 Click **Bulk Add** above the collection to paste links from text or spreadsheet cells. HTTP and HTTPS URLs are extracted in their original order; existing and repeated URLs are skipped.
 
+## Keyboard shortcuts
+
+- **Ctrl + Alt**: On an ordinary webpage, collect the HTTP or HTTPS hyperlink under the pointer. Text, icons, and images inside a link are supported. The combination is ignored in editable controls and on layouts that report it as AltGr.
+- **Ctrl + Space**: On a supported editable field or Google Sheets cell, copy the complete collection to the clipboard using the current ordering and blank-row setting. Some browsers and web applications do not permit an extension to insert clipboard contents directly, so the page may require **Ctrl + V** after the notification.
+- **Ctrl + .**: Add the current page, using the existing Chrome command.
+
+The popup's **Keyboard Shortcuts** panel lists these shortcuts and the existing context-menu actions. Operating-system and browser shortcuts can take precedence over Ctrl + Space.
+
 ## Storage
 
 The extension uses:

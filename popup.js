@@ -10,6 +10,7 @@ const itemStatus = document.getElementById("itemStatus");
 const itemsList = document.getElementById("itemsList");
 const emptyState = document.getElementById("emptyState");
 const copyAllBtn = document.getElementById("copyAllBtn");
+const quickPasteBtn = document.getElementById("quickPasteBtn");
 const copyClearBtn = document.getElementById("copyClearBtn");
 const clearAllBtn = document.getElementById("clearAllBtn");
 const randomizeBtn = document.getElementById("randomizeBtn");
@@ -31,6 +32,9 @@ const bulkPanel = document.getElementById("bulkPanel");
 const bulkInput = document.getElementById("bulkInput");
 const bulkCancelBtn = document.getElementById("bulkCancelBtn");
 const bulkSubmitBtn = document.getElementById("bulkSubmitBtn");
+const shortcutsBtn = document.getElementById("shortcutsBtn");
+const shortcutsDialog = document.getElementById("shortcutsDialog");
+const shortcutsCloseBtn = document.getElementById("shortcutsCloseBtn");
 
 let items = [];
 let settings = { ...DEFAULT_SETTINGS };
@@ -41,6 +45,15 @@ let undoCountdownTimer;
 let undoToken;
 let clearInProgress = false;
 const app = document.querySelector(".app");
+
+shortcutsBtn.addEventListener("click", () => {
+    shortcutsDialog.showModal();
+    shortcutsCloseBtn.focus();
+});
+shortcutsCloseBtn.addEventListener("click", () => shortcutsDialog.close());
+shortcutsDialog.addEventListener("click", event => {
+    if (event.target === shortcutsDialog) shortcutsDialog.close();
+});
 
 document.addEventListener("DOMContentLoaded", initialize);
 
@@ -100,6 +113,7 @@ function render() {
     itemsList.hidden = items.length === 0;
     itemStatus.textContent = items.length ? `${items.length} ${items.length === 1 ? "item" : "items"} saved` : "No items yet";
     copyAllBtn.disabled = items.length === 0;
+    quickPasteBtn.disabled = items.length === 0;
     copyClearBtn.disabled = items.length === 0;
     clearAllBtn.disabled = items.length === 0;
     clearConfirmCount.textContent = `${items.length} collected ${items.length === 1 ? "item" : "items"}`;
@@ -248,6 +262,11 @@ function formatRows(values, interval) {
 copyAllBtn.addEventListener("click", async () => {
     const current = await getItems();
     if (await writeClipboard(current)) showToast(`${current.length} ${current.length === 1 ? "item" : "items"} copied`);
+});
+
+quickPasteBtn.addEventListener("click", async () => {
+    const current = await getItems();
+    if (await writeClipboard(current)) showToast("Links copied. Press Ctrl+V to paste.");
 });
 
 copySelectedBtn.addEventListener("click", async () => {
