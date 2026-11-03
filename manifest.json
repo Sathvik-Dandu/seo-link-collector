@@ -9,6 +9,7 @@
     "activeTab",
     "scripting",
     "clipboardWrite",
+    "clipboardRead",
     "alarms"
   ],
   "host_permissions": [

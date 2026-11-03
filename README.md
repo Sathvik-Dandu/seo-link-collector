@@ -2,6 +2,8 @@
 
 A Chrome extension for collecting SEO submission URLs and text using the browser's right-click menu.
 
+The popup also includes a separate **Repeater** tab for repeating arbitrary non-empty text lines. It does not add those lines to the link collection.
+
 ## Features
 
 - Add links from right-click menu
@@ -73,6 +75,10 @@ Click **Bulk Add** above the collection to paste links from text or spreadsheet 
 - **Ctrl + .**: Add the current page, using the existing Chrome command.
 
 The popup's **Keyboard Shortcuts** panel lists these shortcuts and the existing context-menu actions. Operating-system and browser shortcuts can take precedence over Ctrl + Space. Clipboard permissions or page restrictions may block insertion; use normal **Ctrl + V** in that case. Use **Copy All** to copy the collection for Google Sheets; copying does not remove items.
+
+## Text & Link Repeater
+
+Open the **Repeater** tab, enter one item per line, and choose 1–100 repetitions per item. Blank and whitespace-only lines are ignored; the original contents and order of other lines are preserved. Generate the single-column output, edit it if needed, then use **Copy Output** to copy it to the system clipboard. Input is limited to 100,000 characters, and generated output is limited to 10,000 rows and 1,000,000 characters. The Repeater does not modify the saved SEO Link Collector items and does not paste output into webpages or spreadsheets.
 
 ### Test Quick Paste
 

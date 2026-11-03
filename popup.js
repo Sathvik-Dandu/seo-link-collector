@@ -10,7 +10,6 @@ const itemStatus = document.getElementById("itemStatus");
 const itemsList = document.getElementById("itemsList");
 const emptyState = document.getElementById("emptyState");
 const copyAllBtn = document.getElementById("copyAllBtn");
-const quickPasteBtn = document.getElementById("quickPasteBtn");
 const copyClearBtn = document.getElementById("copyClearBtn");
 const clearAllBtn = document.getElementById("clearAllBtn");
 const randomizeBtn = document.getElementById("randomizeBtn");
@@ -35,6 +34,25 @@ const bulkSubmitBtn = document.getElementById("bulkSubmitBtn");
 const shortcutsBtn = document.getElementById("shortcutsBtn");
 const shortcutsDialog = document.getElementById("shortcutsDialog");
 const shortcutsCloseBtn = document.getElementById("shortcutsCloseBtn");
+const collectorTab = document.getElementById("collectorTab");
+const repeaterTab = document.getElementById("repeaterTab");
+const collectorView = document.getElementById("collectorView");
+const repeaterView = document.getElementById("repeaterView");
+const repeaterInput = document.getElementById("repeaterInput");
+const repeatCountInput = document.getElementById("repeatCount");
+const repeaterOutput = document.getElementById("repeaterOutput");
+const repeaterItemCount = document.getElementById("repeaterItemCount");
+const repeaterCountStat = document.getElementById("repeaterCountStat");
+const repeaterRowCount = document.getElementById("repeaterRowCount");
+const repeaterValidation = document.getElementById("repeaterValidation");
+const repeaterClipboardMessage = document.getElementById("repeaterClipboardMessage");
+const generateRepeatedBtn = document.getElementById("generateRepeatedBtn");
+const copyRepeatedBtn = document.getElementById("copyRepeatedBtn");
+const clearRepeaterInputBtn = document.getElementById("clearRepeaterInputBtn");
+const clearRepeaterOutputBtn = document.getElementById("clearRepeaterOutputBtn");
+const MAX_REPEATER_INPUT_CHARS = 100_000;
+const MAX_REPEATER_OUTPUT_ROWS = 10_000;
+const MAX_REPEATER_OUTPUT_CHARS = 1_000_000;
 
 let items = [];
 let settings = { ...DEFAULT_SETTINGS };
@@ -54,6 +72,116 @@ shortcutsCloseBtn.addEventListener("click", () => shortcutsDialog.close());
 shortcutsDialog.addEventListener("click", event => {
     if (event.target === shortcutsDialog) shortcutsDialog.close();
 });
+
+collectorTab.addEventListener("click", () => switchView("collector"));
+repeaterTab.addEventListener("click", () => switchView("repeater"));
+
+function switchView(view) {
+    const showRepeater = view === "repeater";
+    collectorView.hidden = showRepeater;
+    repeaterView.hidden = !showRepeater;
+    collectorTab.classList.toggle("active", !showRepeater);
+    repeaterTab.classList.toggle("active", showRepeater);
+    collectorTab.setAttribute("aria-selected", String(!showRepeater));
+    repeaterTab.setAttribute("aria-selected", String(showRepeater));
+}
+
+repeaterInput.addEventListener("input", updateRepeaterState);
+repeatCountInput.addEventListener("input", updateRepeaterState);
+repeaterOutput.addEventListener("input", () => {
+    repeaterClipboardMessage.textContent = "";
+    repeaterClipboardMessage.classList.remove("error");
+    updateRepeaterState();
+});
+generateRepeatedBtn.addEventListener("click", generateRepeatedOutput);
+copyRepeatedBtn.addEventListener("click", copyRepeatedOutput);
+clearRepeaterInputBtn.addEventListener("click", () => {
+    repeaterInput.value = "";
+    repeaterValidation.textContent = "";
+    repeaterValidation.classList.remove("error");
+    updateRepeaterState();
+    repeaterInput.focus();
+});
+clearRepeaterOutputBtn.addEventListener("click", () => {
+    repeaterOutput.value = "";
+    repeaterClipboardMessage.textContent = "";
+    repeaterClipboardMessage.classList.remove("error");
+    updateRepeaterState();
+});
+updateRepeaterState();
+
+function getRepeaterItems() {
+    return repeaterInput.value.split(/\r\n?|\n/).filter(line => line.trim().length > 0);
+}
+
+function getRepeatCount() {
+    const raw = repeatCountInput.value.trim();
+    if (!/^\d+$/.test(raw)) return null;
+    const count = Number(raw);
+    return Number.isSafeInteger(count) && count >= 1 && count <= 100 ? count : null;
+}
+
+function updateRepeaterState() {
+    const source = repeaterInput.value;
+    const inputItems = getRepeaterItems();
+    const count = getRepeatCount();
+    const rows = count ? inputItems.length * count : 0;
+    repeaterItemCount.textContent = String(inputItems.length);
+    repeaterCountStat.textContent = count ? String(count) : "—";
+    repeaterRowCount.textContent = count ? String(rows) : "—";
+    repeatCountInput.setAttribute("aria-invalid", String(count === null));
+
+    let error = "";
+    if (source.length > MAX_REPEATER_INPUT_CHARS) {
+        error = `Input is too large. Keep it under ${MAX_REPEATER_INPUT_CHARS.toLocaleString()} characters.`;
+    } else if (!count) {
+        error = "Enter a whole number from 1 to 100.";
+    } else if (!inputItems.length && source.trim().length > 0) {
+        error = "Add at least one non-empty line to generate output.";
+    } else if (rows > MAX_REPEATER_OUTPUT_ROWS) {
+        error = `Output would contain ${rows.toLocaleString()} rows. The limit is ${MAX_REPEATER_OUTPUT_ROWS.toLocaleString()} rows.`;
+    } else if (inputItems.length) {
+        const outputLength = inputItems.reduce((sum, line) => sum + line.length * count, 0) + Math.max(0, rows - 1);
+        if (outputLength > MAX_REPEATER_OUTPUT_CHARS) {
+            error = `Output would exceed ${MAX_REPEATER_OUTPUT_CHARS.toLocaleString()} characters. Reduce the input or repeat count.`;
+        }
+    }
+
+    repeaterValidation.textContent = error;
+    repeaterValidation.classList.toggle("error", Boolean(error));
+    generateRepeatedBtn.disabled = Boolean(error) || !count || inputItems.length === 0;
+    copyRepeatedBtn.disabled = repeaterOutput.value.length === 0;
+    clearRepeaterInputBtn.disabled = source.length === 0;
+    clearRepeaterOutputBtn.disabled = repeaterOutput.value.length === 0;
+}
+
+function generateRepeatedOutput() {
+    updateRepeaterState();
+    if (generateRepeatedBtn.disabled) return;
+    const count = getRepeatCount();
+    const outputRows = [];
+    for (const item of getRepeaterItems()) {
+        for (let repeat = 0; repeat < count; repeat++) outputRows.push(item);
+    }
+    repeaterOutput.value = outputRows.join("\n");
+    repeaterClipboardMessage.textContent = "";
+    repeaterClipboardMessage.classList.remove("error");
+    updateRepeaterState();
+}
+
+async function copyRepeatedOutput() {
+    if (!repeaterOutput.value) return;
+    try {
+        if (!navigator.clipboard?.writeText) throw new Error("Clipboard writing is unavailable");
+        await navigator.clipboard.writeText(repeaterOutput.value);
+        repeaterClipboardMessage.textContent = "Output copied to the clipboard.";
+        repeaterClipboardMessage.classList.remove("error");
+    } catch (error) {
+        console.error("Unable to copy repeated output:", error);
+        repeaterClipboardMessage.textContent = "Unable to copy output. Check clipboard access and try again.";
+        repeaterClipboardMessage.classList.add("error");
+    }
+}
 
 document.addEventListener("DOMContentLoaded", initialize);
 
@@ -113,7 +241,6 @@ function render() {
     itemsList.hidden = items.length === 0;
     itemStatus.textContent = items.length ? `${items.length} ${items.length === 1 ? "item" : "items"} saved` : "No items yet";
     copyAllBtn.disabled = items.length === 0;
-    quickPasteBtn.disabled = items.length === 0;
     copyClearBtn.disabled = items.length === 0;
     clearAllBtn.disabled = items.length === 0;
     clearConfirmCount.textContent = `${items.length} collected ${items.length === 1 ? "item" : "items"}`;
@@ -188,12 +315,17 @@ async function saveItems(nextItems) {
 
 function requestCollectionMutation(type, payload = {}) {
     return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({ type: `seoCollector:${type}`, ...payload }, response => {
-            const runtimeError = chrome.runtime.lastError;
-            if (runtimeError) return reject(new Error(runtimeError.message));
-            if (!response || response.error) return reject(new Error(response?.error || "No response from collector"));
-            resolve(response);
-        });
+        if (!chrome.runtime?.sendMessage) return reject(new Error("Extension messaging is unavailable"));
+        try {
+            chrome.runtime.sendMessage({ type: `seoCollector:${type}`, ...payload }, response => {
+                const runtimeError = chrome.runtime.lastError;
+                if (runtimeError) return reject(new Error(runtimeError.message));
+                if (!response || response.error) return reject(new Error(response?.error || "No response from collector"));
+                resolve(response);
+            });
+        } catch (error) {
+            reject(error);
+        }
     });
 }
 
@@ -262,11 +394,6 @@ function formatRows(values, interval) {
 copyAllBtn.addEventListener("click", async () => {
     const current = await getItems();
     if (await writeClipboard(current)) showToast(`${current.length} ${current.length === 1 ? "item" : "items"} copied`);
-});
-
-quickPasteBtn.addEventListener("click", async () => {
-    const current = await getItems();
-    if (await writeClipboard(current)) showToast("Links copied. Press Ctrl+V to paste.");
 });
 
 copySelectedBtn.addEventListener("click", async () => {
@@ -510,14 +637,16 @@ bulkPanel.addEventListener("submit", async event => {
     event.preventDefault();
     const parsed = extractBulkUrls(bulkInput.value);
     if (!parsed.urls.length) {
-        showToast(parsed.invalid ? "No valid HTTP/HTTPS URLs found. Review the pasted text." : "No HTTP/HTTPS URLs found.");
+        showToast(parsed.invalid
+            ? `Added 0. Skipped 0 duplicates and ${parsed.invalid} invalid.`
+            : "No HTTP/HTTPS URLs found.");
         bulkInput.focus();
         return;
     }
 
     bulkSubmitBtn.disabled = true;
     try {
-        const result = await requestCollectionMutation("bulkAdd", { urls: parsed.urls });
+        const result = await addBulkItemsInPopup(parsed.urls);
         items = result.items;
         render();
         const invalid = parsed.invalid;
@@ -531,6 +660,28 @@ bulkPanel.addEventListener("submit", async event => {
     }
 });
 
+async function addBulkItemsInPopup(urls) {
+    const current = await getItems();
+    const next = [...current];
+    const knownValues = new Set(current.map(item => item.value.toLowerCase()));
+    let added = 0;
+    let duplicates = 0;
+    for (const rawValue of urls) {
+        const value = typeof rawValue === "string" ? rawValue.trim() : "";
+        if (!isHttpUrl(value)) continue;
+        const key = value.toLowerCase();
+        if (knownValues.has(key)) {
+            duplicates++;
+            continue;
+        }
+        knownValues.add(key);
+        next.push({ id: crypto.randomUUID(), value, type: "url", createdAt: Date.now() });
+        added++;
+    }
+    if (added) await chrome.storage.local.set({ [STORAGE_KEY]: next });
+    return { added, duplicates, items: added ? next : current };
+}
+
 function closeBulkPanel(clearInput) {
     bulkPanel.hidden = true;
     bulkToggleBtn.setAttribute("aria-expanded", "false");
@@ -541,16 +692,20 @@ function closeBulkPanel(clearInput) {
 function extractBulkUrls(text) {
     const urls = [];
     let invalid = 0;
-    const urlLike = /\b(?:https?|ftp):\/\/(?:(?!https?:\/\/)[^\s<>"']+)/gi;
-    for (const match of text.matchAll(urlLike)) {
-        const candidate = trimUrlPunctuation(match[0]);
-        if (isHttpUrl(candidate)) urls.push(candidate);
-        else invalid++;
-    }
-    // Bare www links look like URL entries but are not accepted without HTTP(S).
-    for (const match of text.matchAll(/\bwww\.[^\s<>"']+/gi)) {
-        const candidate = trimUrlPunctuation(match[0]);
-        if (!isHttpUrl(candidate)) invalid++;
+    const entries = String(text).split(/[\r\n\t]+/).map(entry => entry.trim()).filter(Boolean);
+    const urlLike = /\b[a-z][a-z\d+.-]*:\/\/[^\s<>"']*/gi;
+    for (const entry of entries) {
+        const matches = [...entry.matchAll(urlLike)];
+        if (!matches.length) {
+            // Count non-empty rows/cells that were submitted but contained no URL.
+            invalid++;
+            continue;
+        }
+        for (const match of matches) {
+            const candidate = trimUrlPunctuation(match[0]);
+            if (isHttpUrl(candidate)) urls.push(candidate);
+            else invalid++;
+        }
     }
     return { urls, invalid };
 }

@@ -112,16 +112,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return true;
     }
 
-    if (message.type === "seoCollector:quickPaste") {
-        getQuickPasteText().then(sendResponse, error => {
-            console.error("Unable to prepare quick paste:", error);
-            sendResponse({ error: "Unable to prepare links" });
-        });
-        return true;
-    }
-
     runCollectionMutation(async () => {
-        if (message.type === "seoCollector:bulkAdd") return addBulkItems(message.urls);
         const result = await chrome.storage.local.get(STORAGE_KEY);
         const items = normalizeStoredItems(result[STORAGE_KEY]);
 
@@ -145,7 +136,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                 token: crypto.randomUUID(),
                 expiresAt: Date.now() + UNDO_TTL_MS,
                 message: message.undoMessage === "Links copied and cleared" ? "Links copied and cleared" : "All links cleared",
-                items: cleared
+                items: cleared,
+                orderIds: items.map(item => item.id)
             };
             await chrome.storage.local.set({ [STORAGE_KEY]: next, [UNDO_KEY]: undo });
             await scheduleUndoExpiry(undo.expiresAt);
@@ -173,8 +165,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                 ids.add(item.id);
                 values.add(valueKey);
             }
-            // Restore the saved sequence first, then retain links added while it was cleared.
-            const next = [...restored, ...current];
+            // Rebuild the saved order, then retain links added while the backup was active.
+            const restoredById = new Map(restored.map(item => [item.id, item]));
+            const currentById = new Map(current.map(item => [item.id, item]));
+            const ordered = [];
+            const orderedIds = new Set();
+            if (Array.isArray(undo.orderIds)) {
+                for (const id of undo.orderIds) {
+                    const item = restoredById.get(id) || currentById.get(id);
+                    if (item && !orderedIds.has(id)) {
+                        ordered.push(item);
+                        orderedIds.add(id);
+                    }
+                }
+            } else {
+                ordered.push(...restored);
+                for (const item of restored) orderedIds.add(item.id);
+            }
+            const next = [...ordered, ...current.filter(item => !orderedIds.has(item.id))];
             await chrome.storage.local.set({ [STORAGE_KEY]: next });
             await chrome.storage.local.remove(UNDO_KEY);
             await clearUndoExpiry();
@@ -204,20 +212,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
                 [SHUFFLE_STATE_KEY]: shuffleState
             });
 
-            async function getQuickPasteText() {
-                const result = await chrome.storage.local.get([STORAGE_KEY, "seoCollectorSettings"]);
-                const items = normalizeStoredItems(result[STORAGE_KEY]);
-                if (!items.length) return { text: "", message: "No collected links yet" };
-                const settings = result.seoCollectorSettings || {};
-                const interval = Number(settings.blankRowInterval);
-                const useBlankRows = settings.blankRowsEnabled === true && Number.isInteger(interval) && interval > 0;
-                const rows = [];
-                items.forEach((item, index) => {
-                    rows.push(item.value);
-                    if (useBlankRows && (index + 1) % interval === 0 && index < items.length - 1) rows.push("");
-                });
-                return { text: rows.join("\n") };
-            }
             return { items: next };
         }
         throw new Error("Unsupported collection operation");
@@ -295,31 +289,6 @@ function normalizeStoredItems(value) {
         ...item,
         id: typeof item.id === "string" && item.id ? item.id : `legacy-${crypto.randomUUID()}`
     }));
-}
-
-async function addBulkItems(values) {
-    const result = await chrome.storage.local.get(STORAGE_KEY);
-    const items = normalizeStoredItems(result[STORAGE_KEY]);
-    const knownValues = new Set(items.map(item => item.value.toLowerCase()));
-    let duplicates = 0;
-    const addedItems = [];
-
-    for (const rawValue of Array.isArray(values) ? values : []) {
-        const value = typeof rawValue === "string" ? rawValue.trim() : "";
-        if (!isCollectableUrl(value)) continue;
-        const key = value.toLowerCase();
-        if (knownValues.has(key)) {
-            duplicates++;
-            continue;
-        }
-        knownValues.add(key);
-        const item = { id: crypto.randomUUID(), value, type: "url", createdAt: Date.now() };
-        items.push(item);
-        addedItems.push(item);
-    }
-
-    if (addedItems.length) await chrome.storage.local.set({ [STORAGE_KEY]: items });
-    return { added: addedItems.length, duplicates, items };
 }
 
 /**

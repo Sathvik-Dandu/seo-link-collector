@@ -12,7 +12,7 @@ body{background:#faf8f2}
 .gradient-layer-three{background:radial-gradient(ellipse 45% 55% at 25% 35%,rgba(255,255,255,.6) 0%,transparent 65%);mix-blend-mode:multiply;filter:blur(88px)}
 .gradient-layer-four{background:linear-gradient(35deg,rgba(255,255,255,.55),transparent 35%,rgba(255,255,255,.25) 65%,transparent);mix-blend-mode:multiply;filter:blur(38px)}
 .app>*:not(.gradient-layer){position:relative;z-index:1}
-.actions{grid-template-columns:1fr 1fr 1.15fr .8fr}
+.actions{grid-template-columns:1fr 1.2fr .8fr}
 .header,.settings{background:rgba(255,255,255,.68)}
 .header-tools{display:flex;align-items:center;gap:7px}
 .toolbar-button,.primary-button{cursor:pointer;transition:all 160ms ease;background:#3b82f6;color:#fff;padding:8px 10px;border:1px solid #2563eb;border-bottom-width:4px;border-radius:8px;font:600 9px inherit;white-space:nowrap}
@@ -40,6 +40,37 @@ body{background:#faf8f2}
 .shortcut-list strong{font-size:10px;color:#1e40af}
 .shortcut-list p{width:100%;margin:1px 0 0;color:#64748b;font-size:9px;line-height:12px}
 .shortcuts-card .primary-button{width:100%}
+
+.view-tabs{flex:none;display:flex;gap:6px;padding:7px 16px 0;background:rgba(255,255,255,.48);border-bottom:1px solid #DCE3ED}
+.view-tab{flex:1;height:30px;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;background:transparent;color:#64748B;font-family:inherit;font-size:10px;font-weight:650;cursor:pointer}
+.view-tab:hover{background:rgba(255,255,255,.55);color:#2458A6}
+.view-tab.active{border-color:#C9D7EB;background:#fff;color:#2458A6}
+.view-tab:focus-visible{outline:2px solid #2458A6;outline-offset:1px}
+.collector-view{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.collector-view[hidden],.repeater-view[hidden]{display:none}
+.repeater-view{flex:1;min-height:0;display:flex;flex-direction:column;gap:7px;padding:10px 16px 6px;overflow-y:auto}
+.repeater-heading h2{margin:0;color:#17243A;font-size:12px;font-weight:700}
+.repeater-heading p{margin:3px 0 0;color:#64748B;font-size:9px;line-height:13px}
+.repeater-field{min-height:0;display:flex;flex:1 1 0;flex-direction:column;gap:4px}
+.repeater-field>label,.repeater-options>label{color:#334155;font-size:9px;font-weight:650}
+.repeater-field>label span{float:right;color:#64748B;font-weight:500}
+.repeater-textarea{width:100%;min-height:66px;flex:1;resize:vertical;padding:7px 8px;border:1px solid #DCE3ED;border-radius:7px;background:rgba(255,255,255,.86);color:#17243A;font-family:inherit;font-size:10px;line-height:14px;white-space:pre;overflow:auto}
+.repeater-textarea::placeholder{color:#94A3B8;white-space:pre-wrap}
+.repeater-textarea:focus-visible,.repeater-options input:focus-visible{outline:2px solid #2458A6;outline-offset:1px}
+.repeater-options{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.repeater-options input{width:66px;height:26px;padding:2px 6px;border:1px solid #DCE3ED;border-radius:6px;background:#fff;color:#17243A;font-family:inherit;font-size:10px}
+.repeater-options input[aria-invalid="true"]{border-color:#DC4545}
+.repeater-stats{flex:none;display:flex;justify-content:space-between;gap:4px;color:#64748B;font-size:8px}
+.repeater-stats strong{color:#2458A6;font-size:9px;font-variant-numeric:tabular-nums}
+.repeater-message,.repeater-clipboard-message{flex:none;min-height:0;margin:0;color:#64748B;font-size:9px;line-height:12px}
+.repeater-message.error,.repeater-clipboard-message.error{color:#B42318}
+.repeater-message:empty,.repeater-clipboard-message:empty{display:none}
+.repeater-generate{flex:none;width:100%;height:31px}
+.repeater-output-field{flex:1.1 1 0}
+.repeater-actions{flex:none;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.repeater-actions .button{height:30px;padding:0 5px;font-size:9px;white-space:nowrap}
+.repeater-view button:disabled{opacity:.48;cursor:not-allowed}
+@media(max-height:540px){.repeater-view{gap:5px;padding-top:7px}.repeater-textarea{min-height:48px}.repeater-heading p{line-height:11px}}
 @media (min-width:431px){
  .gradient-layer-two{filter:blur(65px)}
  .gradient-layer-three{filter:blur(126px)}
